@@ -10,19 +10,20 @@ app.use(express.static(path.join(__dirname, "public")));
 
 const DB_FILE = path.join(__dirname, "data.json");
 
-// =====================================================
-// CẤU HÌNH CÔNG TY DƯƠNG TRIỆU PHÁT
-// =====================================================
+/* =====================================================
+   CẤU HÌNH CÔNG TY
+===================================================== */
 
 const COMPANY_LAT = 10.912145556678649;
-const COMPANY_LON = 106.79440737355388;
+const COMPANY_LNG = 106.79440737355388;
 
-// Nhân viên phải ở trong bán kính 200m
-const MAX_DISTANCE = 200;
+/* Bán kính được phép chấm công: 300 mét */
+const ALLOWED_RADIUS = 300;
 
-// =====================================================
-// DATABASE
-// =====================================================
+
+/* =====================================================
+   DATABASE
+===================================================== */
 
 if (!fs.existsSync(DB_FILE)) {
   fs.writeFileSync(
@@ -54,160 +55,112 @@ if (!fs.existsSync(DB_FILE)) {
   );
 }
 
-function readDB() {
-  return JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
-}
+const readDB = () =>
+  JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
 
-function writeDB(data) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
-}
+const writeDB = (data) =>
+  fs.writeFileSync(
+    DB_FILE,
+    JSON.stringify(data, null, 2)
+  );
 
-// =====================================================
-// SESSION
-// =====================================================
+
+/* =====================================================
+   SESSION
+===================================================== */
 
 const sessions = new Map();
 
-// =====================================================
-// TÍNH KHOẢNG CÁCH GPS
-// =====================================================
 
-function distanceMeter(lat1, lon1, lat2, lon2) {
+/* =====================================================
+   TÍNH KHOẢNG CÁCH 2 VỊ TRÍ GPS
+===================================================== */
+
+function distanceInMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000;
 
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
 
   const a =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2;
+    Math.cos(lat1 * Math.PI / 180) *
+    Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) ** 2;
 
-  const c =
-    2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const c = 2 * Math.atan2(
+    Math.sqrt(a),
+    Math.sqrt(1 - a)
+  );
 
   return R * c;
 }
 
-// =====================================================
-// LẤY NGÀY / GIỜ VIỆT NAM
-// =====================================================
 
-function getVietnamDate() {
-  return new Date().toLocaleDateString("vi-VN", {
-    timeZone: "Asia/Ho_Chi_Minh"
-  });
-}
-
-function getVietnamTime() {
-  return new Date().toLocaleTimeString("vi-VN", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit"
-  });
-}
-
-// =====================================================
-// AUTH
-// =====================================================
+/* =====================================================
+   KIỂM TRA ĐĂNG NHẬP
+===================================================== */
 
 function auth(req, res, next) {
-  const token = req.headers.authorization || "";
+
+  const token =
+    req.headers.authorization || "";
 
   const session = sessions.get(token);
 
   if (!session) {
-    return res.status(401).json({
-      error: "Bạn chưa đăng nhập."
-    });
+    return res
+      .status(401)
+      .json({ error: "Chưa đăng nhập" });
   }
 
   req.user = session;
+
   next();
 }
 
-function adminOnly(req, res, next) {
+
+/* =====================================================
+   KIỂM TRA ADMIN
+===================================================== */
+
+function admin(req, res, next) {
+
   if (req.user.role !== "admin") {
-    return res.status(403).json({
-      error: "Bạn không có quyền thực hiện thao tác này."
-    });
+    return res
+      .status(403)
+      .json({ error: "Không có quyền" });
   }
 
   next();
 }
 
-// =====================================================
-// KIỂM TRA GPS
-// =====================================================
 
-function checkLocation(req, res) {
-  const lat = Number(req.body.lat);
-  const lon = Number(req.body.lon);
-
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-    res.status(400).json({
-      error:
-        "Không lấy được vị trí của thiết bị. Vui lòng bật GPS và cho phép website truy cập vị trí."
-    });
-
-    return false;
-  }
-
-  const distance = distanceMeter(
-    COMPANY_LAT,
-    COMPANY_LON,
-    lat,
-    lon
-  );
-
-  if (distance > MAX_DISTANCE) {
-    res.status(403).json({
-      error:
-        `Bạn đang cách công ty khoảng ${Math.round(
-          distance
-        )}m. Chỉ được chấm công trong phạm vi ${MAX_DISTANCE}m quanh công ty.`,
-      distance: Math.round(distance)
-    });
-
-    return false;
-  }
-
-  req.location = {
-    lat,
-    lon,
-    distance: Math.round(distance)
-  };
-
-  return true;
-}
-
-// =====================================================
-// ĐĂNG NHẬP
-// =====================================================
+/* =====================================================
+   ĐĂNG NHẬP
+===================================================== */
 
 app.post("/api/login", (req, res) => {
+
   const db = readDB();
 
-  const name = String(req.body.name || "").trim();
-  const password = String(req.body.password || "");
-
   const user = db.users.find(
-    (u) =>
-      u.name === name &&
-      u.password === password
+    x =>
+      x.name === req.body.name &&
+      x.password === req.body.password
   );
 
   if (!user) {
-    return res.status(401).json({
-      error: "Sai tên đăng nhập hoặc mật khẩu."
-    });
+    return res
+      .status(401)
+      .json({
+        error: "Sai tài khoản hoặc mật khẩu"
+      });
   }
 
   const token =
-    Math.random().toString(36).substring(2) +
-    Date.now().toString(36);
+    Math.random().toString(36).slice(2) +
+    Date.now();
 
   sessions.set(token, {
     name: user.name,
@@ -215,198 +168,243 @@ app.post("/api/login", (req, res) => {
   });
 
   res.json({
-    ok: true,
     token,
     name: user.name,
     role: user.role
   });
 });
 
-// =====================================================
-// THÔNG TIN TÀI KHOẢN
-// =====================================================
+
+/* =====================================================
+   THÔNG TIN NGƯỜI ĐANG ĐĂNG NHẬP
+===================================================== */
 
 app.get("/api/me", auth, (req, res) => {
-  res.json({
-    name: req.user.name,
-    role: req.user.role
-  });
+  res.json(req.user);
 });
 
-// =====================================================
-// XÁC ĐỊNH CA
-// =====================================================
 
-function getShift() {
-  const hour = Number(
-    new Date().toLocaleString("en-US", {
-      timeZone: "Asia/Ho_Chi_Minh",
-      hour: "2-digit",
-      hour12: false
-    })
-  );
-
-  if (hour < 12) {
-    return "Sáng";
-  }
-
-  return "Chiều";
-}
-
-// =====================================================
-// CHẤM VÀO
-// =====================================================
+/* =====================================================
+   CHẤM CÔNG VÀO
+   - Bắt buộc gửi GPS
+   - Phải trong bán kính 300m
+   - Tối đa 2 ca/ngày
+===================================================== */
 
 app.post("/api/checkin", auth, (req, res) => {
+
   if (req.user.role === "admin") {
     return res.status(403).json({
-      error: "Tài khoản Admin không dùng để chấm công."
+      error: "Admin không chấm công bằng tài khoản quản trị"
     });
   }
 
-  if (!checkLocation(req, res)) {
-    return;
+  const {
+    latitude,
+    longitude
+  } = req.body;
+
+  /* Không có GPS */
+  if (
+    typeof latitude !== "number" ||
+    typeof longitude !== "number"
+  ) {
+    return res.status(400).json({
+      error:
+        "Không lấy được vị trí. Hãy bật GPS/vị trí rồi thử lại."
+    });
   }
+
+  /* Tính khoảng cách tới công ty */
+
+  const distance = distanceInMeters(
+    latitude,
+    longitude,
+    COMPANY_LAT,
+    COMPANY_LNG
+  );
+
+  /* Không ở gần công ty */
+
+  if (distance > ALLOWED_RADIUS) {
+    return res.status(403).json({
+      error:
+        `Bạn đang cách công ty khoảng ${Math.round(distance)} mét. Không thể chấm công ngoài phạm vi ${ALLOWED_RADIUS} mét.`
+    });
+  }
+
 
   const db = readDB();
 
-  const date = getVietnamDate();
-  const time = getVietnamTime();
-  const shift = getShift();
+  const now = new Date();
 
-  const today = db.records.filter(
-    (r) =>
-      r.user === req.user.name &&
-      r.date === date
+  const date = now.toLocaleDateString(
+    "vi-VN",
+    {
+      timeZone: "Asia/Ho_Chi_Minh"
+    }
   );
 
-  const sameShift = today.find(
-    (r) => r.shift === shift
+  const time = now.toLocaleTimeString(
+    "vi-VN",
+    {
+      timeZone: "Asia/Ho_Chi_Minh",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    }
   );
 
-  if (sameShift && sameShift.in && !sameShift.out) {
+
+  /* Các ca của nhân viên trong ngày */
+
+  const todayRecords = db.records.filter(
+    x =>
+      x.user === req.user.name &&
+      x.date === date
+  );
+
+
+  /* Đang có ca chưa checkout */
+
+  const openRecord = todayRecords.find(
+    x => !x.out
+  );
+
+  if (openRecord) {
     return res.status(409).json({
-      error: `Bạn đã chấm VÀO ca ${shift}. Vui lòng chấm RA trước.`
+      error:
+        "Bạn đang có một ca chưa chấm công ra."
     });
   }
 
-  if (sameShift && sameShift.in && sameShift.out) {
+
+  /* Tối đa 2 ca/ngày */
+
+  if (todayRecords.length >= 2) {
     return res.status(409).json({
-      error: `Ca ${shift} hôm nay đã chấm đủ VÀO và RA.`
+      error:
+        "Bạn đã chấm đủ 2 ca trong ngày hôm nay."
     });
   }
 
-  if (today.length >= 2) {
-    return res.status(409).json({
-      error: "Bạn đã chấm đủ 2 ca trong ngày."
-    });
-  }
+
+  /* Tạo ca mới */
 
   db.records.push({
     user: req.user.name,
     date,
-    shift,
     in: time,
     out: "",
-    latIn: req.location.lat,
-    lonIn: req.location.lon,
-    distanceIn: req.location.distance,
-    latOut: "",
-    lonOut: "",
-    distanceOut: "",
-    status: "Đang làm"
+    latitude,
+    longitude,
+    distance: Math.round(distance),
+    session: todayRecords.length + 1
   });
 
   writeDB(db);
 
   res.json({
     ok: true,
-    message: `Chấm VÀO ca ${shift} thành công.`,
-    shift,
-    time
+    message:
+      `Đã chấm công vào ca ${todayRecords.length + 1}.`,
+    distance: Math.round(distance)
   });
 });
 
-// =====================================================
-// CHẤM RA
-// =====================================================
+
+/* =====================================================
+   CHẤM CÔNG RA
+===================================================== */
 
 app.post("/api/checkout", auth, (req, res) => {
+
   if (req.user.role === "admin") {
     return res.status(403).json({
-      error: "Tài khoản Admin không dùng để chấm công."
+      error: "Không hợp lệ"
     });
-  }
-
-  if (!checkLocation(req, res)) {
-    return;
   }
 
   const db = readDB();
 
-  const date = getVietnamDate();
-  const time = getVietnamTime();
-  const shift = getShift();
+  const now = new Date();
+
+  const date = now.toLocaleDateString(
+    "vi-VN",
+    {
+      timeZone: "Asia/Ho_Chi_Minh"
+    }
+  );
+
+  const time = now.toLocaleTimeString(
+    "vi-VN",
+    {
+      timeZone: "Asia/Ho_Chi_Minh",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    }
+  );
+
 
   const record = db.records
     .slice()
     .reverse()
     .find(
-      (r) =>
-        r.user === req.user.name &&
-        r.date === date &&
-        r.shift === shift &&
-        r.in &&
-        !r.out
+      x =>
+        x.user === req.user.name &&
+        x.date === date &&
+        !x.out
     );
+
 
   if (!record) {
     return res.status(409).json({
       error:
-        `Không tìm thấy ca ${shift} đang mở. Bạn phải chấm VÀO trước.`
+        "Không tìm thấy ca đang mở."
     });
   }
 
+
   record.out = time;
-  record.latOut = req.location.lat;
-  record.lonOut = req.location.lon;
-  record.distanceOut = req.location.distance;
-  record.status = "Hoàn tất";
 
   writeDB(db);
 
   res.json({
     ok: true,
-    message: `Chấm RA ca ${shift} thành công.`,
-    shift,
-    time
+    message: "Đã chấm công ra."
   });
 });
 
-// =====================================================
-// NHÂN VIÊN XEM LỊCH SỬ CỦA MÌNH
-// =====================================================
+
+/* =====================================================
+   XEM CÔNG CỦA NHÂN VIÊN
+===================================================== */
 
 app.get("/api/my-records", auth, (req, res) => {
+
   const db = readDB();
 
-  const records = db.records
-    .filter((r) => r.user === req.user.name)
-    .slice()
-    .reverse();
-
-  res.json(records);
+  res.json(
+    db.records
+      .filter(
+        x => x.user === req.user.name
+      )
+      .reverse()
+  );
 });
 
-// =====================================================
-// ADMIN XEM TẤT CẢ
-// =====================================================
+
+/* =====================================================
+   ADMIN XEM TẤT CẢ
+===================================================== */
 
 app.get(
   "/api/records",
   auth,
-  adminOnly,
+  admin,
   (req, res) => {
+
     const db = readDB();
 
     res.json(
@@ -417,23 +415,25 @@ app.get(
   }
 );
 
-// =====================================================
-// XUẤT EXCEL
-// =====================================================
+
+/* =====================================================
+   XUẤT EXCEL
+===================================================== */
 
 app.get(
   "/api/export",
   auth,
-  adminOnly,
+  admin,
   async (req, res) => {
+
     const db = readDB();
 
-    const workbook = new ExcelJS.Workbook();
+    const wb = new ExcelJS.Workbook();
 
-    const sheet =
-      workbook.addWorksheet("Chấm công");
+    const ws =
+      wb.addWorksheet("Cham cong");
 
-    sheet.columns = [
+    ws.columns = [
       {
         header: "Nhân viên",
         key: "user",
@@ -446,8 +446,8 @@ app.get(
       },
       {
         header: "Ca",
-        key: "shift",
-        width: 12
+        key: "session",
+        width: 8
       },
       {
         header: "Giờ vào",
@@ -460,38 +460,27 @@ app.get(
         width: 14
       },
       {
-        header: "Khoảng cách vào (m)",
-        key: "distanceIn",
-        width: 22
-      },
-      {
-        header: "Khoảng cách ra (m)",
-        key: "distanceOut",
-        width: 22
-      },
-      {
-        header: "Trạng thái",
-        key: "status",
-        width: 18
+        header: "Khoảng cách công ty (m)",
+        key: "distance",
+        width: 24
       }
     ];
 
-    db.records.forEach((r) => {
-      sheet.addRow({
-        user: r.user,
-        date: r.date,
-        shift: r.shift,
-        in: r.in,
-        out: r.out,
-        distanceIn: r.distanceIn,
-        distanceOut: r.distanceOut,
-        status: r.status
-      });
-    });
 
-    sheet.getRow(1).font = {
-      bold: true
-    };
+    db.records.forEach(
+      record => {
+        ws.addRow({
+          user: record.user,
+          date: record.date,
+          session: record.session,
+          in: record.in,
+          out: record.out || "Chưa chấm ra",
+          distance:
+            record.distance ?? ""
+        });
+      }
+    );
+
 
     res.setHeader(
       "Content-Type",
@@ -500,23 +489,24 @@ app.get(
 
     res.setHeader(
       "Content-Disposition",
-      'attachment; filename="Cham_cong_Duong_Trieu_Phat.xlsx"'
+      "attachment; filename=Cham_cong_Duong_Trieu_Phat.xlsx"
     );
 
-    await workbook.xlsx.write(res);
+    await wb.xlsx.write(res);
 
     res.end();
   }
 );
 
-// =====================================================
-// SERVER
-// =====================================================
 
-const PORT = process.env.PORT || 3000;
+/* =====================================================
+   CHẠY SERVER
+===================================================== */
 
-app.listen(PORT, () => {
-  console.log(
-    `Cổng chấm công Dương Triệu Phát đang chạy tại cổng ${PORT}`
-  );
-});
+app.listen(
+  3000,
+  () =>
+    console.log(
+      "DTP attendance running on http://localhost:3000"
+    )
+);
