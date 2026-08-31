@@ -6,25 +6,9 @@ const ExcelJS = require("exceljs");
 const app = express();
 
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
 
-/* =====================================================
-   GIAO DIỆN
-===================================================== */
-
-const PUBLIC_DIR = path.join(__dirname, "public");
-
-app.use(express.static(PUBLIC_DIR));
-
-app.get("/", (req, res) => {
-  const indexFile = path.join(PUBLIC_DIR, "index.html");
-
-  if (fs.existsSync(indexFile)) {
-    return res.sendFile(indexFile);
-  }
-
-  return res.status(404).send("Không tìm thấy giao diện.");
-});
-
+const DB_FILE = path.join(__dirname, "data.json");
 
 /* =====================================================
    CẤU HÌNH CÔNG TY
@@ -41,107 +25,44 @@ const ALLOWED_RADIUS = 300;
    DATABASE
 ===================================================== */
 
-const DB_FILE = path.join(__dirname, "data.json");
-
-function createDefaultDB() {
-  return {
-    users: [
-      {
-        name: "Lê Hiền",
-        password: "1234",
-        role: "employee"
-      },
-      {
-        name: "Linh",
-        password: "1234",
-        role: "employee"
-      },
-      {
-        name: "Admin",
-        password: "admin123",
-        role: "admin"
-      }
-    ],
-    records: []
-  };
-}
-
-
-/*
-   Nếu chưa có data.json thì tạo mới
-*/
-
 if (!fs.existsSync(DB_FILE)) {
   fs.writeFileSync(
     DB_FILE,
-    JSON.stringify(createDefaultDB(), null, 2),
-    "utf8"
+    JSON.stringify(
+      {
+        users: [
+          {
+            name: "Lê Hiền",
+            password: "1234",
+            role: "employee"
+          },
+          {
+            name: "Linh",
+            password: "1234",
+            role: "employee"
+          },
+          {
+            name: "Admin",
+            password: "admin123",
+            role: "admin"
+          }
+        ],
+        records: []
+      },
+      null,
+      2
+    )
   );
 }
 
+const readDB = () =>
+  JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
 
-/*
-   Đọc database
-*/
-
-function readDB() {
-  try {
-    const data = JSON.parse(
-      fs.readFileSync(DB_FILE, "utf8")
-    );
-
-    if (!Array.isArray(data.users)) {
-      data.users = [];
-    }
-
-    if (!Array.isArray(data.records)) {
-      data.records = [];
-    }
-
-    /*
-       Đảm bảo tài khoản Admin luôn tồn tại
-    */
-
-    const adminExists = data.users.some(
-      user =>
-        user.name === "Admin" &&
-        user.role === "admin"
-    );
-
-    if (!adminExists) {
-      data.users.push({
-        name: "Admin",
-        password: "admin123",
-        role: "admin"
-      });
-
-      writeDB(data);
-    }
-
-    return data;
-
-  } catch (error) {
-
-    const newDB = createDefaultDB();
-
-    writeDB(newDB);
-
-    return newDB;
-  }
-}
-
-
-/*
-   Ghi database
-*/
-
-function writeDB(data) {
+const writeDB = (data) =>
   fs.writeFileSync(
     DB_FILE,
-    JSON.stringify(data, null, 2),
-    "utf8"
+    JSON.stringify(data, null, 2)
   );
-}
 
 
 /* =====================================================
@@ -149,6 +70,32 @@ function writeDB(data) {
 ===================================================== */
 
 const sessions = new Map();
+
+
+/* =====================================================
+   COOKIE
+===================================================== */
+
+function getCookie(req, name) {
+
+  const cookieHeader = req.headers.cookie || "";
+
+  const cookies = cookieHeader
+    .split(";")
+    .map(x => x.trim());
+
+  const cookie = cookies.find(
+    x => x.startsWith(name + "=")
+  );
+
+  if (!cookie) {
+    return null;
+  }
+
+  return decodeURIComponent(
+    cookie.substring(name.length + 1)
+  );
+}
 
 
 /* =====================================================
@@ -165,14 +112,10 @@ function distanceInMeters(
   const R = 6371000;
 
   const dLat =
-    (lat2 - lat1) *
-    Math.PI /
-    180;
+    (lat2 - lat1) * Math.PI / 180;
 
   const dLon =
-    (lon2 - lon1) *
-    Math.PI /
-    180;
+    (lon2 - lon1) * Math.PI / 180;
 
   const a =
     Math.sin(dLat / 2) ** 2 +
@@ -197,19 +140,28 @@ function distanceInMeters(
 
 function auth(req, res, next) {
 
-  const token =
+  /* Ưu tiên Authorization */
+  let token =
     req.headers.authorization || "";
 
-  const session =
-    sessions.get(token);
+  /* Nếu không có thì lấy cookie */
+  if (!token) {
+    token = getCookie(req, "dtp_session") || "";
+  }
+
+  const session = sessions.get(token);
 
   if (!session) {
-    return res.status(401).json({
-      error: "Chưa đăng nhập."
-    });
+
+    return res
+      .status(401)
+      .json({
+        error: "Chưa đăng nhập."
+      });
   }
 
   req.user = session;
+  req.token = token;
 
   next();
 }
@@ -222,9 +174,12 @@ function auth(req, res, next) {
 function admin(req, res, next) {
 
   if (req.user.role !== "admin") {
-    return res.status(403).json({
-      error: "Không có quyền quản trị."
-    });
+
+    return res
+      .status(403)
+      .json({
+        error: "Không có quyền quản trị."
+      });
   }
 
   next();
@@ -245,35 +200,43 @@ app.post("/api/login", (req, res) => {
   const password =
     String(req.body.password || "");
 
-  const user =
-    db.users.find(
-      x =>
-        x.name === name &&
-        x.password === password
-    );
+  const user = db.users.find(
+    x =>
+      x.name === name &&
+      x.password === password
+  );
 
   if (!user) {
-    return res.status(401).json({
-      error:
-        "Sai tài khoản hoặc mật khẩu."
-    });
+
+    return res
+      .status(401)
+      .json({
+        error:
+          "Sai tài khoản hoặc mật khẩu."
+      });
   }
 
-
   const token =
-    Math.random()
-      .toString(36)
-      .slice(2) +
+    Math.random().toString(36).slice(2) +
     Date.now().toString(36);
-
 
   sessions.set(token, {
     name: user.name,
     role: user.role
   });
 
+  /*
+    Lưu phiên đăng nhập vào cookie.
+    Nhờ vậy khi bấm /api/export trực tiếp
+    trình duyệt vẫn nhận ra tài khoản.
+  */
 
-  return res.json({
+  res.setHeader(
+    "Set-Cookie",
+    `dtp_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax`
+  );
+
+  res.json({
     ok: true,
     token,
     name: user.name,
@@ -283,7 +246,27 @@ app.post("/api/login", (req, res) => {
 
 
 /* =====================================================
-   KIỂM TRA TÀI KHOẢN
+   ĐĂNG XUẤT
+===================================================== */
+
+app.post("/api/logout", auth, (req, res) => {
+
+  sessions.delete(req.token);
+
+  res.setHeader(
+    "Set-Cookie",
+    "dtp_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+  );
+
+  res.json({
+    ok: true,
+    message: "Đã đăng xuất."
+  });
+});
+
+
+/* =====================================================
+   THÔNG TIN NGƯỜI ĐANG ĐĂNG NHẬP
 ===================================================== */
 
 app.get("/api/me", auth, (req, res) => {
@@ -292,7 +275,6 @@ app.get("/api/me", auth, (req, res) => {
     name: req.user.name,
     role: req.user.role
   });
-
 });
 
 
@@ -303,57 +285,32 @@ app.get("/api/me", auth, (req, res) => {
 app.post("/api/checkin", auth, (req, res) => {
 
   if (req.user.role === "admin") {
-    return res.status(403).json({
-      error:
-        "Admin không chấm công bằng tài khoản quản trị."
-    });
+
+    return res
+      .status(403)
+      .json({
+        error:
+          "Admin không chấm công bằng tài khoản quản trị."
+      });
   }
 
-
-  const latitude =
-    Number(req.body.latitude);
-
-  const longitude =
-    Number(req.body.longitude);
-
-
-  /*
-     Kiểm tra GPS
-  */
+  const {
+    latitude,
+    longitude
+  } = req.body;
 
   if (
-    !Number.isFinite(latitude) ||
-    !Number.isFinite(longitude)
+    typeof latitude !== "number" ||
+    typeof longitude !== "number"
   ) {
 
-    return res.status(400).json({
-      error:
-        "Không lấy được vị trí. Hãy bật GPS/vị trí rồi thử lại."
-    });
+    return res
+      .status(400)
+      .json({
+        error:
+          "Không lấy được vị trí. Hãy bật GPS/vị trí rồi thử lại."
+      });
   }
-
-
-  /*
-     Kiểm tra tọa độ hợp lệ
-  */
-
-  if (
-    latitude < -90 ||
-    latitude > 90 ||
-    longitude < -180 ||
-    longitude > 180
-  ) {
-
-    return res.status(400).json({
-      error:
-        "Tọa độ GPS không hợp lệ."
-    });
-  }
-
-
-  /*
-     Tính khoảng cách
-  */
 
   const distance =
     distanceInMeters(
@@ -363,158 +320,89 @@ app.post("/api/checkin", auth, (req, res) => {
       COMPANY_LNG
     );
 
-
-  /*
-     Không cho chấm ngoài công ty
-  */
-
   if (distance > ALLOWED_RADIUS) {
 
-    return res.status(403).json({
-      error:
-        `Bạn đang cách công ty khoảng ${Math.round(distance)} mét. Không thể chấm công ngoài phạm vi ${ALLOWED_RADIUS} mét.`
-    });
+    return res
+      .status(403)
+      .json({
+        error:
+          `Bạn đang cách công ty khoảng ${Math.round(distance)} mét. Không thể chấm công ngoài phạm vi ${ALLOWED_RADIUS} mét.`
+      });
   }
-
 
   const db = readDB();
 
   const now = new Date();
 
-
-  /*
-     Ngày Việt Nam
-  */
-
   const date =
     now.toLocaleDateString(
       "vi-VN",
       {
-        timeZone:
-          "Asia/Ho_Chi_Minh"
+        timeZone: "Asia/Ho_Chi_Minh"
       }
     );
-
-
-  /*
-     Giờ Việt Nam
-  */
 
   const time =
     now.toLocaleTimeString(
       "vi-VN",
       {
-        timeZone:
-          "Asia/Ho_Chi_Minh",
-
+        timeZone: "Asia/Ho_Chi_Minh",
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit"
       }
     );
 
-
-  /*
-     Lấy các ca hôm nay
-  */
-
   const todayRecords =
     db.records.filter(
-      record =>
-        record.user === req.user.name &&
-        record.date === date
+      x =>
+        x.user === req.user.name &&
+        x.date === date
     );
-
-
-  /*
-     Nếu đang có ca chưa chấm ra
-  */
 
   const openRecord =
     todayRecords.find(
-      record => !record.out
+      x => !x.out
     );
-
 
   if (openRecord) {
 
-    return res.status(409).json({
-      error:
-        `Bạn đang ở ca ${openRecord.session} và chưa chấm công ra.`
-    });
+    return res
+      .status(409)
+      .json({
+        error:
+          "Bạn đang có một ca chưa chấm công ra."
+      });
   }
-
-
-  /*
-     Tối đa 2 ca/ngày
-  */
 
   if (todayRecords.length >= 2) {
 
-    return res.status(409).json({
-      error:
-        "Bạn đã chấm đủ 2 ca trong ngày hôm nay."
-    });
+    return res
+      .status(409)
+      .json({
+        error:
+          "Bạn đã chấm đủ 2 ca trong ngày hôm nay."
+      });
   }
 
-
-  /*
-     Xác định ca
-  */
-
-  const sessionNumber =
-    todayRecords.length + 1;
-
-
-  /*
-     Tạo bản ghi
-  */
-
   db.records.push({
-
-    user:
-      req.user.name,
-
-    date:
-      date,
-
-    in:
-      time,
-
-    out:
-      "",
-
-    latitude:
-      latitude,
-
-    longitude:
-      longitude,
-
-    distance:
-      Math.round(distance),
-
-    session:
-      sessionNumber
-
+    user: req.user.name,
+    date,
+    in: time,
+    out: "",
+    latitude,
+    longitude,
+    distance: Math.round(distance),
+    session: todayRecords.length + 1
   });
-
 
   writeDB(db);
 
-
-  return res.json({
-
+  res.json({
     ok: true,
-
     message:
-      `Đã chấm công vào ca ${sessionNumber}.`,
-
-    session:
-      sessionNumber,
-
-    distance:
-      Math.round(distance)
-
+      `Đã chấm công vào ca ${todayRecords.length + 1}.`,
+    distance: Math.round(distance)
   });
 });
 
@@ -527,99 +415,71 @@ app.post("/api/checkout", auth, (req, res) => {
 
   if (req.user.role === "admin") {
 
-    return res.status(403).json({
-      error:
-        "Admin không chấm công."
-    });
+    return res
+      .status(403)
+      .json({
+        error: "Không hợp lệ."
+      });
   }
-
 
   const db = readDB();
 
   const now = new Date();
 
-
   const date =
     now.toLocaleDateString(
       "vi-VN",
       {
-        timeZone:
-          "Asia/Ho_Chi_Minh"
+        timeZone: "Asia/Ho_Chi_Minh"
       }
     );
-
 
   const time =
     now.toLocaleTimeString(
       "vi-VN",
       {
-        timeZone:
-          "Asia/Ho_Chi_Minh",
-
+        timeZone: "Asia/Ho_Chi_Minh",
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit"
       }
     );
 
-
-  /*
-     Tìm ca đang mở
-  */
-
   const record =
     db.records
       .slice()
       .reverse()
       .find(
-        item =>
-          item.user === req.user.name &&
-          item.date === date &&
-          !item.out
+        x =>
+          x.user === req.user.name &&
+          x.date === date &&
+          !x.out
       );
-
 
   if (!record) {
 
-    return res.status(409).json({
-      error:
-        "Không tìm thấy ca đang mở."
-    });
+    return res
+      .status(409)
+      .json({
+        error:
+          "Không tìm thấy ca đang mở."
+      });
   }
-
-
-  /*
-     Ghi giờ ra
-  */
 
   record.out = time;
 
-
   writeDB(db);
 
-
-  return res.json({
-
+  res.json({
     ok: true,
-
     message:
-      `Đã chấm công ra ca ${record.session}.`,
-
-    session:
-      record.session,
-
-    in:
-      record.in,
-
-    out:
-      record.out
-
+      "Đã chấm công ra."
   });
 });
 
 
 /* =====================================================
-   NHÂN VIÊN XEM LỊCH SỬ
+   NHÂN VIÊN XEM CÔNG
 ===================================================== */
 
 app.get(
@@ -629,16 +489,14 @@ app.get(
 
     const db = readDB();
 
-    const records =
+    res.json(
       db.records
         .filter(
-          record =>
-            record.user === req.user.name
+          x =>
+            x.user === req.user.name
         )
-        .slice()
-        .reverse();
-
-    res.json(records);
+        .reverse()
+    );
   }
 );
 
@@ -678,237 +536,136 @@ app.get(
 
       const db = readDB();
 
-      const workbook =
+      const wb =
         new ExcelJS.Workbook();
 
+      const ws =
+        wb.addWorksheet("Cham cong");
 
-      workbook.creator =
-        "Dương Triều Phát";
-
-      workbook.created =
-        new Date();
-
-
-      const worksheet =
-        workbook.addWorksheet(
-          "Cham cong"
-        );
-
-
-      worksheet.columns = [
-
+      ws.columns = [
         {
           header: "Nhân viên",
           key: "user",
-          width: 25
+          width: 22
         },
-
         {
           header: "Ngày",
           key: "date",
-          width: 15
+          width: 14
         },
-
         {
           header: "Ca",
           key: "session",
-          width: 10
+          width: 8
         },
-
         {
           header: "Giờ vào",
           key: "in",
-          width: 15
+          width: 14
         },
-
         {
           header: "Giờ ra",
           key: "out",
-          width: 15
+          width: 14
         },
-
         {
-          header:
-            "Khoảng cách công ty (m)",
+          header: "Khoảng cách công ty (m)",
           key: "distance",
-          width: 28
+          width: 24
         }
-
       ];
 
+      /* Tiêu đề đậm */
 
-      /*
-         Tiêu đề
-      */
-
-      worksheet.getRow(1).font = {
+      ws.getRow(1).font = {
         bold: true
       };
 
+      /* Dữ liệu */
 
-      /*
-         Dữ liệu
-      */
+      db.records.forEach(
+        record => {
 
-      db.records.forEach(record => {
-
-        worksheet.addRow({
-
-          user:
-            record.user || "",
-
-          date:
-            record.date || "",
-
-          session:
-            record.session || "",
-
-          in:
-            record.in || "",
-
-          out:
-            record.out ||
-            "Chưa chấm ra",
-
-          distance:
-            record.distance != null
-              ? record.distance
-              : ""
-
-        });
-
-      });
-
-
-      /*
-         Kẻ bảng
-      */
-
-      worksheet.eachRow(
-        (row) => {
-
-          row.eachCell(
-            (cell) => {
-
-              cell.border = {
-
-                top: {
-                  style: "thin"
-                },
-
-                left: {
-                  style: "thin"
-                },
-
-                bottom: {
-                  style: "thin"
-                },
-
-                right: {
-                  style: "thin"
-                }
-
-              };
-
-            }
-          );
+          ws.addRow({
+            user: record.user,
+            date: record.date,
+            session: record.session,
+            in: record.in,
+            out:
+              record.out ||
+              "Chưa chấm ra",
+            distance:
+              record.distance ?? ""
+          });
 
         }
       );
 
+      /* Cố định dòng tiêu đề */
 
-      /*
-         Header căn giữa
-      */
+      ws.views = [
+        {
+          state: "frozen",
+          ySplit: 1
+        }
+      ];
 
-      worksheet.getRow(1).alignment = {
-        horizontal: "center",
-        vertical: "middle"
+      /* Bộ lọc */
+
+      ws.autoFilter = {
+        from: "A1",
+        to: "F1"
       };
-
-
-      /*
-         Nội dung
-      */
-
-      worksheet.eachRow(
-        (row, rowNumber) => {
-
-          if (rowNumber > 1) {
-
-            row.alignment = {
-              vertical: "middle"
-            };
-
-          }
-
-        }
-      );
-
-
-      /*
-         Header tải file
-      */
 
       res.setHeader(
         "Content-Type",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
       );
 
-
       res.setHeader(
         "Content-Disposition",
-        "attachment; filename=Cham_cong_Duong_Trieu_Phat.xlsx"
+        'attachment; filename="Cham_cong_Duong_Trieu_Phat.xlsx"'
       );
 
-
-      /*
-         Xuất Excel
-      */
-
-      await workbook.xlsx.write(res);
+      await wb.xlsx.write(res);
 
       res.end();
-
 
     } catch (error) {
 
       console.error(
-        "Lỗi xuất Excel:",
+        "EXPORT ERROR:",
         error
       );
 
       if (!res.headersSent) {
 
-        res.status(500).json({
-          error:
-            "Không thể xuất file Excel."
-        });
-
+        res
+          .status(500)
+          .json({
+            error:
+              "Không thể xuất file Excel."
+          });
       }
-
     }
-
   }
 );
 
 
 /* =====================================================
-   KIỂM TRA SERVER
+   TRANG CHỦ
 ===================================================== */
 
-app.get(
-  "/api/status",
-  (req, res) => {
+app.get("/", (req, res) => {
 
-    res.json({
-      ok: true,
-      message:
-        "Hệ thống chấm công đang hoạt động."
-    });
-
-  }
-);
+  res.sendFile(
+    path.join(
+      __dirname,
+      "public",
+      "index.html"
+    )
+  );
+});
 
 
 /* =====================================================
@@ -918,9 +675,9 @@ app.get(
 const PORT =
   process.env.PORT || 3000;
 
-
 app.listen(
   PORT,
+  "0.0.0.0",
   () => {
 
     console.log(
