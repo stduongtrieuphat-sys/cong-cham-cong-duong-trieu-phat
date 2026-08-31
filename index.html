@@ -1,14 +1,1381 @@
-<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cổng chấm công - Dương Triệu Phát</title><style>
-body{font-family:Arial;margin:0;background:#f4f7fb;color:#172033}header{background:#173b72;color:#fff;padding:22px 28px}h1{margin:0;font-size:24px}.wrap{max-width:1050px;margin:30px auto;padding:0 16px}.card{background:#fff;border-radius:16px;padding:24px;margin-bottom:18px;box-shadow:0 5px 22px #0001}.login{max-width:420px;margin:60px auto}input,select,button{width:100%;padding:13px;margin-top:8px;border-radius:9px;border:1px solid #d6dce7;box-sizing:border-box}button{border:0;font-weight:bold;cursor:pointer}.blue{background:#1769e0;color:#fff}.gray{background:#edf2f8}.actions{display:grid;grid-template-columns:1fr 1fr;gap:12px}.clock{text-align:center;font-size:42px;font-weight:bold;color:#173b72;margin:20px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border-bottom:1px solid #eee;text-align:left}th{background:#f7f9fc}.hidden{display:none}@media(max-width:650px){.actions{grid-template-columns:1fr}}</style></head><body>
-<header><h1>CỔNG CHẤM CÔNG</h1><div>CÔNG TY DƯƠNG TRIỆU PHÁT</div></header><main class="wrap">
-<section id="login" class="card login"><h2>Đăng nhập</h2><select id="name"><option>Lê Hiền</option><option>Linh</option><option>Admin</option></select><input id="password" type="password" placeholder="Mật khẩu"><button class="blue" onclick="login()">ĐĂNG NHẬP</button></section>
-<section id="emp" class="hidden"><div class="card"><h2 id="hello"></h2><div class="clock" id="clock"></div><div id="status"></div><div class="actions"><button class="blue" onclick="act('/api/checkin')">CHẤM CÔNG VÀO</button><button class="gray" onclick="act('/api/checkout')">CHẤM CÔNG RA</button></div></div><div class="card"><h2>Lịch sử của tôi</h2><div id="mine"></div></div></section>
-<section id="adm" class="hidden"><div class="card"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><h2>Dữ liệu chấm công</h2><button class="blue" style="width:auto" onclick="download()">XUẤT EXCEL</button></div><div id="all"></div></div></section>
-</main><script>
-let token='';const $=id=>document.getElementById(id);function tick(){$('clock').textContent=new Date().toLocaleTimeString('vi-VN')}setInterval(tick,1000);tick();
-async function login(){let r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('name').value,password:$('password').value})}),j=await r.json();if(!r.ok)return alert(j.error);token=j.token;$('login').classList.add('hidden');if(j.role==='admin'){ $('adm').classList.remove('hidden');loadAll()}else{$('emp').classList.remove('hidden');$('hello').textContent='Xin chào, '+j.name;loadMine()}}
-async function act(url){let r=await fetch(url,{method:'POST',headers:{Authorization:token}}),j=await r.json();alert(j.error||'Đã ghi nhận thành công');loadMine()}
-async function loadMine(){let r=await fetch('/api/my-records',{headers:{Authorization:token}}),a=await r.json();$('mine').innerHTML='<table><tr><th>Ngày</th><th>Giờ vào</th><th>Giờ ra</th><th>Trạng thái</th></tr>'+a.map(x=>`<tr><td>${x.date}</td><td>${x.in||''}</td><td>${x.out||''}</td><td>${x.out?'Hoàn tất':'Chưa chấm ra'}</td></tr>`).join('')+'</table>'}
-async function loadAll(){let r=await fetch('/api/records',{headers:{Authorization:token}}),a=await r.json();$('all').innerHTML='<table><tr><th>Nhân viên</th><th>Ngày</th><th>Giờ vào</th><th>Giờ ra</th><th>Trạng thái</th></tr>'+a.map(x=>`<tr><td>${x.user}</td><td>${x.date}</td><td>${x.in}</td><td>${x.out}</td><td>${x.out?'Hoàn tất':'Chưa chấm ra'}</td></tr>`).join('')+'</table>'}
-function download(){fetch('/api/export',{headers:{Authorization:token}}).then(r=>r.blob()).then(b=>{let a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='Cham_cong_Duong_Trieu_Phat.xlsx';a.click()})}
-</script></body></html>
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>Chấm công Dương Triều Phát</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f3f4f6;
+      color: #222;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .header {
+      background: #1d4ed8;
+      color: white;
+      padding: 25px 20px;
+      border-radius: 16px;
+      text-align: center;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.12);
+    }
+
+    .header h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+
+    .header p {
+      margin: 0;
+      font-size: 15px;
+      opacity: 0.95;
+    }
+
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 22px;
+      margin-bottom: 20px;
+      box-shadow: 0 3px 12px rgba(0,0,0,0.08);
+    }
+
+    .card h2 {
+      margin-top: 0;
+      font-size: 21px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    input {
+      width: 100%;
+      padding: 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      margin-bottom: 12px;
+      font-size: 16px;
+    }
+
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 13px 18px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      margin: 5px;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-login {
+      width: 100%;
+      background: #1d4ed8;
+      color: white;
+      margin: 0;
+    }
+
+    .btn-in {
+      background: #16a34a;
+      color: white;
+    }
+
+    .btn-out {
+      background: #dc2626;
+      color: white;
+    }
+
+    .btn-refresh {
+      background: #6b7280;
+      color: white;
+    }
+
+    .btn-excel {
+      background: #059669;
+      color: white;
+    }
+
+    .btn-logout {
+      background: #374151;
+      color: white;
+    }
+
+    .user-info {
+      background: #eff6ff;
+      border-radius: 12px;
+      padding: 15px;
+      margin-bottom: 15px;
+    }
+
+    .user-info strong {
+      color: #1d4ed8;
+    }
+
+    .buttons {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 5px;
+      margin-top: 15px;
+    }
+
+    .status {
+      padding: 14px;
+      border-radius: 10px;
+      margin-top: 15px;
+      font-weight: bold;
+      text-align: center;
+      display: none;
+    }
+
+    .status.success {
+      display: block;
+      background: #dcfce7;
+      color: #166534;
+    }
+
+    .status.error {
+      display: block;
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .status.info {
+      display: block;
+      background: #dbeafe;
+      color: #1e40af;
+    }
+
+    .gps-box {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 15px;
+      margin-top: 15px;
+      font-size: 14px;
+    }
+
+    .gps-box div {
+      margin: 5px 0;
+    }
+
+    .table-wrapper {
+      width: 100%;
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      min-width: 600px;
+    }
+
+    th {
+      background: #1d4ed8;
+      color: white;
+      padding: 11px 8px;
+      border: 1px solid #ddd;
+    }
+
+    td {
+      padding: 10px 8px;
+      border: 1px solid #ddd;
+      text-align: center;
+    }
+
+    tr:nth-child(even) {
+      background: #f9fafb;
+    }
+
+    .empty {
+      text-align: center;
+      padding: 25px;
+      color: #6b7280;
+    }
+
+    .map {
+      width: 100%;
+      height: 300px;
+      border: 0;
+      border-radius: 12px;
+      margin-top: 15px;
+    }
+
+    .login-logo {
+      font-size: 45px;
+      margin-bottom: 10px;
+    }
+
+    .small {
+      font-size: 13px;
+      color: #6b7280;
+    }
+
+    @media (max-width: 600px) {
+      .container {
+        padding: 10px;
+      }
+
+      .header h1 {
+        font-size: 22px;
+      }
+
+      .card {
+        padding: 16px;
+      }
+
+      button {
+        width: 100%;
+        margin: 4px 0;
+      }
+
+      .buttons {
+        display: block;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <!-- ==============================
+       HEADER
+  =============================== -->
+  <div class="header">
+    <h1>CHẤM CÔNG ONLINE</h1>
+    <p>CÔNG TY DƯƠNG TRIỀU PHÁT</p>
+  </div>
+
+
+  <!-- ==============================
+       ĐĂNG NHẬP
+  =============================== -->
+  <div id="loginCard" class="card">
+
+    <div style="text-align:center;">
+      <div class="login-logo">🕘</div>
+
+      <h2>Đăng nhập</h2>
+
+      <p class="small">
+        Vui lòng đăng nhập để chấm công
+      </p>
+    </div>
+
+    <input
+      type="text"
+      id="username"
+      placeholder="Tên đăng nhập"
+      autocomplete="username"
+    >
+
+    <input
+      type="password"
+      id="password"
+      placeholder="Mật khẩu"
+      autocomplete="current-password"
+    >
+
+    <button
+      class="btn-login"
+      onclick="login()"
+    >
+      ĐĂNG NHẬP
+    </button>
+
+    <div id="loginStatus" class="status"></div>
+
+  </div>
+
+
+  <!-- ==============================
+       KHU VỰC NHÂN VIÊN
+  =============================== -->
+  <div id="employeeArea" class="hidden">
+
+    <div class="card">
+
+      <div class="user-info">
+        Xin chào,
+        <strong id="userName"></strong>
+      </div>
+
+      <h2>📍 Chấm công</h2>
+
+      <p>
+        Hệ thống yêu cầu bật vị trí GPS để xác định bạn đang ở công ty.
+      </p>
+
+      <div class="gps-box">
+
+        <div>
+          <strong>Vĩ độ:</strong>
+          <span id="latitude">Chưa lấy vị trí</span>
+        </div>
+
+        <div>
+          <strong>Kinh độ:</strong>
+          <span id="longitude">Chưa lấy vị trí</span>
+        </div>
+
+        <div>
+          <strong>Khoảng cách công ty:</strong>
+          <span id="distance">Chưa xác định</span>
+        </div>
+
+      </div>
+
+
+      <div class="buttons">
+
+        <button
+          id="checkinBtn"
+          class="btn-in"
+          onclick="checkin()"
+        >
+          🟢 CHẤM CÔNG VÀO
+        </button>
+
+        <button
+          id="checkoutBtn"
+          class="btn-out"
+          onclick="checkout()"
+        >
+          🔴 CHẤM CÔNG RA
+        </button>
+
+      </div>
+
+
+      <div id="attendanceStatus" class="status"></div>
+
+    </div>
+
+
+    <!-- ==============================
+         LỊCH SỬ CHẤM CÔNG
+    =============================== -->
+
+    <div class="card">
+
+      <h2>📋 Lịch sử chấm công</h2>
+
+      <div class="buttons">
+
+        <button
+          class="btn-refresh"
+          onclick="loadMyRecords()"
+        >
+          🔄 CẬP NHẬT
+        </button>
+
+        <button
+          class="btn-logout"
+          onclick="logout()"
+        >
+          ĐĂNG XUẤT
+        </button>
+
+      </div>
+
+      <div class="table-wrapper">
+
+        <table>
+
+          <thead>
+
+            <tr>
+              <th>Ngày</th>
+              <th>Ca</th>
+              <th>Giờ vào</th>
+              <th>Giờ ra</th>
+              <th>Khoảng cách</th>
+            </tr>
+
+          </thead>
+
+          <tbody id="myRecordsBody">
+
+          </tbody>
+
+        </table>
+
+      </div>
+
+    </div>
+
+
+    <!-- ==============================
+         BẢN ĐỒ CÔNG TY
+    =============================== -->
+
+    <div class="card">
+
+      <h2>📍 Vị trí công ty</h2>
+
+      <p class="small">
+        932A QL1K, Đông Hòa, Hồ Chí Minh
+      </p>
+
+      <iframe
+        class="map"
+        src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3917.6768440671526!2d106.79440737355388!3d10.912145556678649!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3174d8dfabd7067f%3A0xa86d6034006cb32e!2zOTMyYSBRTDFL
+      " 
+        loading="lazy"
+        allowfullscreen>
+      </iframe>
+
+    </div>
+
+  </div>
+
+
+  <!-- ==============================
+       ADMIN
+  =============================== -->
+
+  <div id="adminArea" class="hidden">
+
+    <div class="card">
+
+      <div class="user-info">
+        👑 Quản trị viên:
+        <strong id="adminName"></strong>
+      </div>
+
+      <h2>📊 Quản lý chấm công</h2>
+
+      <div class="buttons">
+
+        <button
+          class="btn-refresh"
+          onclick="loadAllRecords()"
+        >
+          🔄 CẬP NHẬT DỮ LIỆU
+        </button>
+
+        <button
+          class="btn-excel"
+          onclick="exportExcel()"
+        >
+          📥 XUẤT EXCEL
+        </button>
+
+        <button
+          class="btn-logout"
+          onclick="logout()"
+        >
+          ĐĂNG XUẤT
+        </button>
+
+      </div>
+
+      <div class="table-wrapper">
+
+        <table>
+
+          <thead>
+
+            <tr>
+              <th>Nhân viên</th>
+              <th>Ngày</th>
+              <th>Ca</th>
+              <th>Giờ vào</th>
+              <th>Giờ ra</th>
+              <th>Khoảng cách</th>
+            </tr>
+
+          </thead>
+
+          <tbody id="allRecordsBody">
+
+          </tbody>
+
+        </table>
+
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+
+
+<script>
+
+  /* =====================================================
+     BIẾN
+  ===================================================== */
+
+  let token = localStorage.getItem("attendance_token");
+
+  let currentUser = null;
+
+
+  /* =====================================================
+     HIỂN THỊ THÔNG BÁO
+  ===================================================== */
+
+  function showStatus(elementId, message, type) {
+
+    const el = document.getElementById(elementId);
+
+    el.className = "status " + type;
+
+    el.textContent = message;
+
+  }
+
+
+  /* =====================================================
+     ĐĂNG NHẬP
+  ===================================================== */
+
+  async function login() {
+
+    const name =
+      document.getElementById("username").value.trim();
+
+    const password =
+      document.getElementById("password").value;
+
+    if (!name || !password) {
+
+      showStatus(
+        "loginStatus",
+        "Vui lòng nhập tên đăng nhập và mật khẩu.",
+        "error"
+      );
+
+      return;
+    }
+
+
+    try {
+
+      showStatus(
+        "loginStatus",
+        "Đang đăng nhập...",
+        "info"
+      );
+
+
+      const response = await fetch("/api/login", {
+
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json"
+        },
+
+        body: JSON.stringify({
+          name,
+          password
+        })
+
+      });
+
+
+      const data = await response.json();
+
+
+      if (!response.ok) {
+
+        throw new Error(
+          data.error || "Đăng nhập thất bại"
+        );
+
+      }
+
+
+      token = data.token;
+
+      currentUser = data;
+
+
+      localStorage.setItem(
+        "attendance_token",
+        token
+      );
+
+
+      document.getElementById(
+        "loginCard"
+      ).classList.add("hidden");
+
+
+      if (data.role === "admin") {
+
+        document
+          .getElementById("adminArea")
+          .classList.remove("hidden");
+
+        document.getElementById(
+          "adminName"
+        ).textContent = data.name;
+
+        loadAllRecords();
+
+      } else {
+
+        document
+          .getElementById("employeeArea")
+          .classList.remove("hidden");
+
+        document.getElementById(
+          "userName"
+        ).textContent = data.name;
+
+        loadMyRecords();
+
+      }
+
+
+    } catch (error) {
+
+      showStatus(
+        "loginStatus",
+        error.message,
+        "error"
+      );
+
+    }
+
+  }
+
+
+  /* =====================================================
+     LẤY GPS
+  ===================================================== */
+
+  function getGPS() {
+
+    return new Promise((resolve, reject) => {
+
+      if (!navigator.geolocation) {
+
+        reject(
+          new Error(
+            "Trình duyệt không hỗ trợ GPS."
+          )
+        );
+
+        return;
+      }
+
+
+      navigator.geolocation.getCurrentPosition(
+
+        position => {
+
+          const latitude =
+            position.coords.latitude;
+
+          const longitude =
+            position.coords.longitude;
+
+
+          document.getElementById(
+            "latitude"
+          ).textContent =
+            latitude.toFixed(7);
+
+
+          document.getElementById(
+            "longitude"
+          ).textContent =
+            longitude.toFixed(7);
+
+
+          resolve({
+            latitude,
+            longitude
+          });
+
+        },
+
+        error => {
+
+          let message =
+            "Không lấy được vị trí GPS.";
+
+          if (error.code === 1) {
+
+            message =
+              "Bạn chưa cho phép website sử dụng vị trí. Hãy bật quyền vị trí.";
+
+          }
+
+          if (error.code === 2) {
+
+            message =
+              "Không xác định được vị trí hiện tại.";
+
+          }
+
+          if (error.code === 3) {
+
+            message =
+              "Lấy vị trí GPS quá lâu. Vui lòng thử lại.";
+
+          }
+
+          reject(
+            new Error(message)
+          );
+
+        },
+
+        {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0
+        }
+
+      );
+
+    });
+
+  }
+
+
+  /* =====================================================
+     CHẤM CÔNG VÀO
+  ===================================================== */
+
+  async function checkin() {
+
+    const button =
+      document.getElementById("checkinBtn");
+
+    try {
+
+      button.disabled = true;
+
+      showStatus(
+        "attendanceStatus",
+        "Đang lấy vị trí GPS...",
+        "info"
+      );
+
+
+      const gps = await getGPS();
+
+
+      showStatus(
+        "attendanceStatus",
+        "Đang kiểm tra vị trí và chấm công...",
+        "info"
+      );
+
+
+      const response = await fetch(
+        "/api/checkin",
+        {
+
+          method: "POST",
+
+          headers: {
+
+            "Content-Type": "application/json",
+
+            "Authorization": token
+
+          },
+
+          body: JSON.stringify(gps)
+
+        }
+      );
+
+
+      const data =
+        await response.json();
+
+
+      if (!response.ok) {
+
+        throw new Error(
+          data.error ||
+          "Không thể chấm công vào."
+        );
+
+      }
+
+
+      document.getElementById(
+        "distance"
+      ).textContent =
+        Math.round(data.distance) +
+        " mét";
+
+
+      showStatus(
+        "attendanceStatus",
+        data.message +
+        " | Khoảng cách: " +
+        Math.round(data.distance) +
+        "m",
+        "success"
+      );
+
+
+      loadMyRecords();
+
+
+    } catch (error) {
+
+      showStatus(
+        "attendanceStatus",
+        error.message,
+        "error"
+      );
+
+    } finally {
+
+      button.disabled = false;
+
+    }
+
+  }
+
+
+  /* =====================================================
+     CHẤM CÔNG RA
+  ===================================================== */
+
+  async function checkout() {
+
+    const button =
+      document.getElementById("checkoutBtn");
+
+    try {
+
+      button.disabled = true;
+
+
+      showStatus(
+        "attendanceStatus",
+        "Đang chấm công ra...",
+        "info"
+      );
+
+
+      const response =
+        await fetch(
+          "/api/checkout",
+          {
+
+            method: "POST",
+
+            headers: {
+
+              "Content-Type":
+                "application/json",
+
+              "Authorization":
+                token
+
+            }
+
+          }
+        );
+
+
+      const data =
+        await response.json();
+
+
+      if (!response.ok) {
+
+        throw new Error(
+          data.error ||
+          "Không thể chấm công ra."
+        );
+
+      }
+
+
+      showStatus(
+        "attendanceStatus",
+        data.message,
+        "success"
+      );
+
+
+      loadMyRecords();
+
+
+    } catch (error) {
+
+      showStatus(
+        "attendanceStatus",
+        error.message,
+        "error"
+      );
+
+    } finally {
+
+      button.disabled = false;
+
+    }
+
+  }
+
+
+  /* =====================================================
+     XEM CÔNG CỦA NHÂN VIÊN
+  ===================================================== */
+
+  async function loadMyRecords() {
+
+    try {
+
+      const response =
+        await fetch(
+          "/api/my-records",
+          {
+
+            headers: {
+
+              "Authorization":
+                token
+
+            }
+
+          }
+        );
+
+
+      if (response.status === 401) {
+
+        logout();
+
+        return;
+
+      }
+
+
+      const records =
+        await response.json();
+
+
+      const tbody =
+        document.getElementById(
+          "myRecordsBody"
+        );
+
+
+      tbody.innerHTML = "";
+
+
+      if (!records.length) {
+
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5" class="empty">
+              Chưa có dữ liệu chấm công.
+            </td>
+          </tr>
+        `;
+
+        return;
+
+      }
+
+
+      records.forEach(record => {
+
+        const row =
+          document.createElement("tr");
+
+
+        row.innerHTML = `
+
+          <td>${escapeHTML(record.date)}</td>
+
+          <td>
+            Ca ${escapeHTML(
+              String(record.session)
+            )}
+          </td>
+
+          <td>${escapeHTML(record.in)}</td>
+
+          <td>
+            ${
+              record.out
+                ? escapeHTML(record.out)
+                : '<strong style="color:#dc2626;">Chưa chấm ra</strong>'
+            }
+          </td>
+
+          <td>
+            ${
+              record.distance != null
+                ? escapeHTML(
+                    String(record.distance)
+                  ) + " m"
+                : ""
+            }
+          </td>
+
+        `;
+
+
+        tbody.appendChild(row);
+
+      });
+
+
+    } catch (error) {
+
+      console.error(error);
+
+    }
+
+  }
+
+
+  /* =====================================================
+     ADMIN XEM TẤT CẢ
+  ===================================================== */
+
+  async function loadAllRecords() {
+
+    try {
+
+      const response =
+        await fetch(
+          "/api/records",
+          {
+
+            headers: {
+
+              "Authorization":
+                token
+
+            }
+
+          }
+        );
+
+
+      if (response.status === 401) {
+
+        logout();
+
+        return;
+
+      }
+
+
+      if (response.status === 403) {
+
+        alert(
+          "Bạn không có quyền quản trị."
+        );
+
+        return;
+
+      }
+
+
+      const records =
+        await response.json();
+
+
+      const tbody =
+        document.getElementById(
+          "allRecordsBody"
+        );
+
+
+      tbody.innerHTML = "";
+
+
+      if (!records.length) {
+
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6" class="empty">
+              Chưa có dữ liệu chấm công.
+            </td>
+          </tr>
+        `;
+
+        return;
+
+      }
+
+
+      records.forEach(record => {
+
+        const row =
+          document.createElement("tr");
+
+
+        row.innerHTML = `
+
+          <td>
+            ${escapeHTML(record.user)}
+          </td>
+
+          <td>
+            ${escapeHTML(record.date)}
+          </td>
+
+          <td>
+            Ca ${escapeHTML(
+              String(record.session)
+            )}
+          </td>
+
+          <td>
+            ${escapeHTML(record.in)}
+          </td>
+
+          <td>
+            ${
+              record.out
+                ? escapeHTML(record.out)
+                : '<strong style="color:#dc2626;">Chưa chấm ra</strong>'
+            }
+          </td>
+
+          <td>
+            ${
+              record.distance != null
+                ? escapeHTML(
+                    String(record.distance)
+                  ) + " m"
+                : ""
+            }
+          </td>
+
+        `;
+
+
+        tbody.appendChild(row);
+
+      });
+
+
+    } catch (error) {
+
+      console.error(error);
+
+      alert(
+        "Không tải được dữ liệu."
+      );
+
+    }
+
+  }
+
+
+  /* =====================================================
+     XUẤT EXCEL
+  ===================================================== */
+
+  function exportExcel() {
+
+    window.location.href =
+      "/api/export";
+
+  }
+
+
+  /* =====================================================
+     ĐĂNG XUẤT
+  ===================================================== */
+
+  function logout() {
+
+    localStorage.removeItem(
+      "attendance_token"
+    );
+
+    token = null;
+
+    currentUser = null;
+
+    document
+      .getElementById("employeeArea")
+      .classList.add("hidden");
+
+    document
+      .getElementById("adminArea")
+      .classList.add("hidden");
+
+    document
+      .getElementById("loginCard")
+      .classList.remove("hidden");
+
+    document.getElementById(
+      "password"
+    ).value = "";
+
+  }
+
+
+  /* =====================================================
+     CHỐNG HTML LỖI
+  ===================================================== */
+
+  function escapeHTML(value) {
+
+    const div =
+      document.createElement("div");
+
+    div.textContent =
+      value == null ? "" : value;
+
+    return div.innerHTML;
+
+  }
+
+
+  /* =====================================================
+     KIỂM TRA TOKEN KHI MỞ TRANG
+  ===================================================== */
+
+  async function checkLogin() {
+
+    if (!token) {
+
+      return;
+
+    }
+
+
+    try {
+
+      const response =
+        await fetch(
+          "/api/me",
+          {
+
+            headers: {
+
+              "Authorization":
+                token
+
+            }
+
+          }
+        );
+
+
+      if (!response.ok) {
+
+        logout();
+
+        return;
+
+      }
+
+
+      const user =
+        await response.json();
+
+
+      currentUser = user;
+
+
+      document
+        .getElementById("loginCard")
+        .classList.add("hidden");
+
+
+      if (user.role === "admin") {
+
+        document
+          .getElementById("adminArea")
+          .classList.remove("hidden");
+
+        document.getElementById(
+          "adminName"
+        ).textContent =
+          user.name;
+
+        loadAllRecords();
+
+      } else {
+
+        document
+          .getElementById("employeeArea")
+          .classList.remove("hidden");
+
+        document.getElementById(
+          "userName"
+        ).textContent =
+          user.name;
+
+        loadMyRecords();
+
+      }
+
+
+    } catch (error) {
+
+      console.error(error);
+
+    }
+
+  }
+
+
+  /* =====================================================
+     ENTER ĐỂ ĐĂNG NHẬP
+  ===================================================== */
+
+  document
+    .getElementById("password")
+    .addEventListener(
+      "keydown",
+      function(event) {
+
+        if (event.key === "Enter") {
+
+          login();
+
+        }
+
+      }
+    );
+
+
+  /* =====================================================
+     CHẠY
+  ===================================================== */
+
+  checkLogin();
+
+</script>
+
+</body>
+</html>
